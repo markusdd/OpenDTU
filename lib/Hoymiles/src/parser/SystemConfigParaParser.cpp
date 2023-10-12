@@ -1,10 +1,16 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2022 Thomas Basler and others
+ * Copyright (C) 2022 - 2023 Thomas Basler and others
  */
 #include "SystemConfigParaParser.h"
 #include "../Hoymiles.h"
 #include <cstring>
+
+SystemConfigParaParser::SystemConfigParaParser()
+    : Parser()
+{
+    clearBuffer();
+}
 
 void SystemConfigParaParser::clearBuffer()
 {
@@ -24,13 +30,18 @@ void SystemConfigParaParser::appendFragment(uint8_t offset, uint8_t* payload, ui
 
 float SystemConfigParaParser::getLimitPercent()
 {
-    return ((((uint16_t)_payload[2]) << 8) | _payload[3]) / 10.0;
+    HOY_SEMAPHORE_TAKE();
+    float ret = ((((uint16_t)_payload[2]) << 8) | _payload[3]) / 10.0;
+    HOY_SEMAPHORE_GIVE();
+    return ret;
 }
 
 void SystemConfigParaParser::setLimitPercent(float value)
 {
+    HOY_SEMAPHORE_TAKE();
     _payload[2] = ((uint16_t)(value * 10)) >> 8;
     _payload[3] = ((uint16_t)(value * 10));
+    HOY_SEMAPHORE_GIVE();
 }
 
 void SystemConfigParaParser::setLastLimitCommandSuccess(LastCommandSuccess status)
@@ -73,4 +84,9 @@ void SystemConfigParaParser::setLastUpdateRequest(uint32_t lastUpdate)
 {
     _lastUpdateRequest = lastUpdate;
     setLastUpdate(lastUpdate);
+}
+
+uint8_t SystemConfigParaParser::getExpectedByteCount()
+{
+    return SYSTEM_CONFIG_PARA_SIZE;
 }

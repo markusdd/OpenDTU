@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include "Parser.h"
-#include <Arduino.h>
 #include <cstdint>
 #include <list>
 
@@ -104,6 +103,7 @@ typedef struct {
 
 class StatisticsParser : public Parser {
 public:
+    StatisticsParser();
     void clearBuffer();
     void appendFragment(uint8_t offset, uint8_t* payload, uint8_t len);
 
@@ -116,10 +116,13 @@ public:
     fieldSettings_t* getSettingByChannelField(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
 
     float getChannelFieldValue(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
+    String getChannelFieldValueString(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
     bool hasChannelFieldValue(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
     const char* getChannelFieldUnit(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
     const char* getChannelFieldName(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
     uint8_t getChannelFieldDigits(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
+
+    bool setChannelFieldValue(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId, float value);
 
     float getChannelFieldOffset(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId);
     void setChannelFieldOffset(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId, float offset);
@@ -135,15 +138,28 @@ public:
     void incrementRxFailureCount();
     uint32_t getRxFailureCount();
 
+    void zeroRuntimeData();
+    void zeroDailyData();
+
+    // Update time when new data from the inverter is received
+    void setLastUpdate(uint32_t lastUpdate);
+
+    // Update time when internal data structure changes (from inverter and by internal manipulation)
+    uint32_t getLastUpdateFromInternal();
+    void setLastUpdateFromInternal(uint32_t lastUpdate);
+
 private:
+    void zeroFields(const FieldId_t* fields);
+
     uint8_t _payloadStatistic[STATISTIC_PACKET_SIZE] = {};
     uint8_t _statisticLength = 0;
     uint16_t _stringMaxPower[CH_CNT];
 
     const byteAssign_t* _byteAssignment;
     uint8_t _byteAssignmentSize;
-    uint8_t _expectedByteCount;
+    uint8_t _expectedByteCount = 0;
     std::list<fieldSettings_t> _fieldSettings;
 
     uint32_t _rxFailureCount = 0;
+    uint32_t _lastUpdateFromInternal = 0;
 };

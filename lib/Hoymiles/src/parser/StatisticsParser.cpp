@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2022 Thomas Basler and others
+ * Copyright (C) 2022 - 2023 Thomas Basler and others
  */
 #include "StatisticsParser.h"
 #include "../Hoymiles.h"
@@ -27,6 +27,38 @@ const calcFunc_t calcFunctions[] = {
     { CALC_EFF_CH0, &calcEffiencyCh0 },
     { CALC_IRR_CH, &calcIrradiation }
 };
+
+const FieldId_t runtimeFields[] = {
+    FLD_UDC,
+    FLD_IDC,
+    FLD_PDC,
+    FLD_UAC,
+    FLD_IAC,
+    FLD_PAC,
+    FLD_F,
+    FLD_T,
+    FLD_PF,
+    FLD_Q,
+    FLD_UAC_1N,
+    FLD_UAC_2N,
+    FLD_UAC_3N,
+    FLD_UAC_12,
+    FLD_UAC_23,
+    FLD_UAC_31,
+    FLD_IAC_1,
+    FLD_IAC_2,
+    FLD_IAC_3,
+};
+
+const FieldId_t dailyProductionFields[] = {
+    FLD_YD,
+};
+
+StatisticsParser::StatisticsParser()
+    : Parser()
+{
+    clearBuffer();
+}
 
 void StatisticsParser::setByteAssignment(const byteAssign_t* byteAssignment, uint8_t size)
 {
@@ -98,10 +130,12 @@ float StatisticsParser::getChannelFieldValue(ChannelType_t type, ChannelNum_t ch
     if (CMD_CALC != div) {
         // Value is a static value
         uint32_t val = 0;
+        HOY_SEMAPHORE_TAKE();
         do {
             val <<= 8;
             val |= _payloadStatistic[ptr];
         } while (++ptr != end);
+        HOY_SEMAPHORE_GIVE();
 
         float result;
         if (pos->isSigned && pos->num == 2) {
@@ -123,6 +157,54 @@ float StatisticsParser::getChannelFieldValue(ChannelType_t type, ChannelNum_t ch
     }
 
     return 0;
+}
+
+bool StatisticsParser::setChannelFieldValue(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId, float value)
+{
+    const byteAssign_t* pos = getAssignmentByChannelField(type, channel, fieldId);
+    fieldSettings_t* setting = getSettingByChannelField(type, channel, fieldId);
+
+    if (pos == NULL) {
+        return false;
+    }
+
+    uint8_t ptr = pos->start + pos->num - 1;
+    uint8_t end = pos->start;
+    uint16_t div = pos->div;
+
+    if (CMD_CALC == div) {
+        return false;
+    }
+
+    if (setting != NULL) {
+        value -= setting->offset;
+    }
+    value *= static_cast<float>(div);
+
+    uint32_t val = 0;
+    if (pos->isSigned && pos->num == 2) {
+        val = static_cast<uint32_t>(static_cast<int16_t>(value));
+    } else if (pos->isSigned && pos->num == 4) {
+        val = static_cast<uint32_t>(static_cast<int32_t>(value));
+    } else {
+        val = static_cast<uint32_t>(value);
+    }
+
+    HOY_SEMAPHORE_TAKE();
+    do {
+        _payloadStatistic[ptr] = val;
+        val >>= 8;
+    } while (--ptr >= end);
+    HOY_SEMAPHORE_GIVE();
+
+    return true;
+}
+
+String StatisticsParser::getChannelFieldValueString(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId)
+{
+    return String(
+        getChannelFieldValue(type, channel, fieldId),
+        static_cast<unsigned int>(getChannelFieldDigits(type, channel, fieldId)));
 }
 
 bool StatisticsParser::hasChannelFieldValue(ChannelType_t type, ChannelNum_t channel, FieldId_t fieldId)
@@ -219,6 +301,47 @@ void StatisticsParser::incrementRxFailureCount()
 uint32_t StatisticsParser::getRxFailureCount()
 {
     return _rxFailureCount;
+}
+
+void StatisticsParser::zeroRuntimeData()
+{
+    zeroFields(runtimeFields);
+}
+
+void StatisticsParser::zeroDailyData()
+{
+    zeroFields(dailyProductionFields);
+}
+
+void StatisticsParser::setLastUpdate(uint32_t lastUpdate)
+{
+    Parser::setLastUpdate(lastUpdate);
+    setLastUpdateFromInternal(lastUpdate);
+}
+
+uint32_t StatisticsParser::getLastUpdateFromInternal()
+{
+    return _lastUpdateFromInternal;
+}
+
+void StatisticsParser::setLastUpdateFromInternal(uint32_t lastUpdate)
+{
+    _lastUpdateFromInternal = lastUpdate;
+}
+
+void StatisticsParser::zeroFields(const FieldId_t* fields)
+{
+    // Loop all channels
+    for (auto& t : getChannelTypes()) {
+        for (auto& c : getChannelsByType(t)) {
+            for (uint8_t i = 0; i < (sizeof(runtimeFields) / sizeof(runtimeFields[0])); i++) {
+                if (hasChannelFieldValue(t, c, fields[i])) {
+                    setChannelFieldValue(t, c, fields[i], 0);
+                }
+            }
+        }
+    }
+    setLastUpdateFromInternal(millis());
 }
 
 static float calcYieldTotalCh0(StatisticsParser* iv, uint8_t arg0)

@@ -39,6 +39,7 @@ bool ConfigurationClass::write()
     wifi["dns2"] = IPAddress(config.WiFi_Dns2).toString();
     wifi["dhcp"] = config.WiFi_Dhcp;
     wifi["hostname"] = config.WiFi_Hostname;
+    wifi["aptimeout"] = config.WiFi_ApTimeout;
 
     JsonObject ntp = doc.createNestedObject("ntp");
     ntp["server"] = config.Ntp_Server;
@@ -57,6 +58,7 @@ bool ConfigurationClass::write()
     mqtt["topic"] = config.Mqtt_Topic;
     mqtt["retain"] = config.Mqtt_Retain;
     mqtt["publish_interval"] = config.Mqtt_PublishInterval;
+    mqtt["clean_session"] = config.Mqtt_CleanSession;
 
     JsonObject mqtt_lwt = mqtt.createNestedObject("lwt");
     mqtt_lwt["topic"] = config.Mqtt_LwtTopic;
@@ -108,6 +110,9 @@ bool ConfigurationClass::write()
         inv["poll_enable_night"] = config.Inverter[i].Poll_Enable_Night;
         inv["command_enable"] = config.Inverter[i].Command_Enable;
         inv["command_enable_night"] = config.Inverter[i].Command_Enable_Night;
+        inv["reachable_threshold"] = config.Inverter[i].ReachableThreshold;
+        inv["zero_runtime"] = config.Inverter[i].ZeroRuntimeDataIfUnrechable;
+        inv["zero_day"] = config.Inverter[i].ZeroYieldDayOnMidnight;
 
         JsonArray channel = inv.createNestedArray("channel");
         for (uint8_t c = 0; c < INV_MAX_CHAN_COUNT; c++) {
@@ -184,6 +189,7 @@ bool ConfigurationClass::read()
     config.WiFi_Dns2[3] = wifi_dns2[3];
 
     config.WiFi_Dhcp = wifi["dhcp"] | WIFI_DHCP;
+    config.WiFi_ApTimeout = wifi["aptimeout"] | ACCESS_POINT_TIMEOUT;
 
     JsonObject ntp = doc["ntp"];
     strlcpy(config.Ntp_Server, ntp["server"] | NTP_SERVER, sizeof(config.Ntp_Server));
@@ -202,6 +208,7 @@ bool ConfigurationClass::read()
     strlcpy(config.Mqtt_Topic, mqtt["topic"] | MQTT_TOPIC, sizeof(config.Mqtt_Topic));
     config.Mqtt_Retain = mqtt["retain"] | MQTT_RETAIN;
     config.Mqtt_PublishInterval = mqtt["publish_interval"] | MQTT_PUBLISH_INTERVAL;
+    config.Mqtt_CleanSession = mqtt["clean_session"] | MQTT_CLEAN_SESSION;
 
     JsonObject mqtt_lwt = mqtt["lwt"];
     strlcpy(config.Mqtt_LwtTopic, mqtt_lwt["topic"] | MQTT_LWT_TOPIC, sizeof(config.Mqtt_LwtTopic));
@@ -254,6 +261,9 @@ bool ConfigurationClass::read()
         config.Inverter[i].Poll_Enable_Night = inv["poll_enable_night"] | true;
         config.Inverter[i].Command_Enable = inv["command_enable"] | true;
         config.Inverter[i].Command_Enable_Night = inv["command_enable_night"] | true;
+        config.Inverter[i].ReachableThreshold = inv["reachable_threshold"] | REACHABLE_THRESHOLD;
+        config.Inverter[i].ZeroRuntimeDataIfUnrechable = inv["zero_runtime"] | false;
+        config.Inverter[i].ZeroYieldDayOnMidnight = inv["zero_day"] | false;
 
         JsonArray channel = inv["channel"];
         for (uint8_t c = 0; c < INV_MAX_CHAN_COUNT; c++) {
@@ -300,7 +310,7 @@ void ConfigurationClass::migrate()
         config.Mqtt_PublishInterval = mqtt["publish_invterval"];
     }
 
-    if  (config.Cfg_Version < 0x00011900) {
+    if (config.Cfg_Version < 0x00011900) {
         JsonObject dtu = doc["dtu"];
         config.Dtu_NrfPaLevel = dtu["pa_level"];
     }

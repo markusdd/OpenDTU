@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include "Parser.h"
-#include <Arduino.h>
 
 #define DEV_INFO_SIZE 20
 
 class DevInfoParser : public Parser {
 public:
+    DevInfoParser();
     void clearBufferAll();
     void appendFragmentAll(uint8_t offset, uint8_t* payload, uint8_t len);
 
@@ -28,6 +28,8 @@ public:
 
     uint16_t getMaxPower();
     String getHwModelName();
+
+    bool containsValidData();
 
 private:
     time_t timegm(struct tm* tm);

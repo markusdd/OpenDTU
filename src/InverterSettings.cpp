@@ -15,7 +15,7 @@
 // for all generations, this is equivalent to SPI3_HOST in the lower level driver
 // For ESP32-C2, the only externally usable HW SPI controller is SPI2, its signal names
 // being prefixed with FSPI.
-#if  CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3
+#if CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3
 #define SPI_NRF HSPI
 #elif CONFIG_IDF_TARGET_ESP32C3
 #define SPI_NRF FSPI
@@ -71,6 +71,9 @@ void InverterSettingsClass::init()
                     config.Inverter[i].Serial);
 
                 if (inv != nullptr) {
+                    inv->setReachableThreshold(config.Inverter[i].ReachableThreshold);
+                    inv->setZeroValuesIfUnreachable(config.Inverter[i].ZeroRuntimeDataIfUnrechable);
+                    inv->setZeroYieldDayOnMidnight(config.Inverter[i].ZeroYieldDayOnMidnight);
                     for (uint8_t c = 0; c < INV_MAX_CHAN_COUNT; c++) {
                         inv->Statistics()->setStringMaxPower(c, config.Inverter[i].channel[c].MaxChannelPower);
                         inv->Statistics()->setChannelFieldOffset(TYPE_DC, static_cast<ChannelNum_t>(c), FLD_YT, config.Inverter[i].channel[c].YieldTotalOffset);

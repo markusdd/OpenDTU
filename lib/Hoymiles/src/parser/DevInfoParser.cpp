@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2022 Thomas Basler and others
+ * Copyright (C) 2022 - 2023 Thomas Basler and others
  */
 #include "DevInfoParser.h"
 #include "../Hoymiles.h"
@@ -32,10 +32,13 @@ const devInfo_t devInfo[] = {
     { { 0x10, 0x20, 0x41, ALL }, 400, "HMS-400" }, // 00
     { { 0x10, 0x10, 0x51, ALL }, 450, "HMS-450" }, // 01
     { { 0x10, 0x10, 0x71, ALL }, 500, "HMS-500" }, // 02
+    { { 0x10, 0x20, 0x71, ALL }, 500, "HMS-500 v2" }, // 02
     { { 0x10, 0x21, 0x11, ALL }, 600, "HMS-600" }, // 01
     { { 0x10, 0x21, 0x41, ALL }, 800, "HMS-800" }, // 00
     { { 0x10, 0x11, 0x51, ALL }, 900, "HMS-900" }, // 01
+    { { 0x10, 0x21, 0x51, ALL }, 900, "HMS-900" }, // 03
     { { 0x10, 0x21, 0x71, ALL }, 1000, "HMS-1000" }, // 05
+    { { 0x10, 0x11, 0x71, ALL }, 1000, "HMS-1000" }, // 01
     { { 0x10, 0x22, 0x41, ALL }, 1600, "HMS-1600" }, // 4
     { { 0x10, 0x12, 0x51, ALL }, 1800, "HMS-1800" }, // 01
     { { 0x10, 0x22, 0x51, ALL }, 1800, "HMS-1800" }, // 16
@@ -45,6 +48,13 @@ const devInfo_t devInfo[] = {
     { { 0x10, 0x33, 0x11, ALL }, 1800, "HMT-1800" }, // 01
     { { 0x10, 0x33, 0x31, ALL }, 2250, "HMT-2250" } // 01
 };
+
+DevInfoParser::DevInfoParser()
+    : Parser()
+{
+    clearBufferSimple();
+    clearBufferAll();
+}
 
 void DevInfoParser::clearBufferAll()
 {
@@ -102,12 +112,16 @@ void DevInfoParser::setLastUpdateSimple(uint32_t lastUpdate)
 
 uint16_t DevInfoParser::getFwBuildVersion()
 {
-    return (((uint16_t)_payloadDevInfoAll[0]) << 8) | _payloadDevInfoAll[1];
+    HOY_SEMAPHORE_TAKE();
+    uint16_t ret = (((uint16_t)_payloadDevInfoAll[0]) << 8) | _payloadDevInfoAll[1];
+    HOY_SEMAPHORE_GIVE();
+    return ret;
 }
 
 time_t DevInfoParser::getFwBuildDateTime()
 {
     struct tm timeinfo = {};
+    HOY_SEMAPHORE_TAKE();
     timeinfo.tm_year = ((((uint16_t)_payloadDevInfoAll[2]) << 8) | _payloadDevInfoAll[3]) - 1900;
 
     timeinfo.tm_mon = ((((uint16_t)_payloadDevInfoAll[4]) << 8) | _payloadDevInfoAll[5]) / 100 - 1;
@@ -115,13 +129,17 @@ time_t DevInfoParser::getFwBuildDateTime()
 
     timeinfo.tm_hour = ((((uint16_t)_payloadDevInfoAll[6]) << 8) | _payloadDevInfoAll[7]) / 100;
     timeinfo.tm_min = ((((uint16_t)_payloadDevInfoAll[6]) << 8) | _payloadDevInfoAll[7]) % 100;
+    HOY_SEMAPHORE_GIVE();
 
     return timegm(&timeinfo);
 }
 
 uint16_t DevInfoParser::getFwBootloaderVersion()
 {
-    return (((uint16_t)_payloadDevInfoAll[8]) << 8) | _payloadDevInfoAll[9];
+    HOY_SEMAPHORE_TAKE();
+    uint16_t ret = (((uint16_t)_payloadDevInfoAll[8]) << 8) | _payloadDevInfoAll[9];
+    HOY_SEMAPHORE_GIVE();
+    return ret;
 }
 
 uint32_t DevInfoParser::getHwPartNumber()
@@ -129,8 +147,10 @@ uint32_t DevInfoParser::getHwPartNumber()
     uint16_t hwpn_h;
     uint16_t hwpn_l;
 
+    HOY_SEMAPHORE_TAKE();
     hwpn_h = (((uint16_t)_payloadDevInfoSimple[2]) << 8) | _payloadDevInfoSimple[3];
     hwpn_l = (((uint16_t)_payloadDevInfoSimple[4]) << 8) | _payloadDevInfoSimple[5];
+    HOY_SEMAPHORE_GIVE();
 
     return ((uint32_t)hwpn_h << 16) | ((uint32_t)hwpn_l);
 }
@@ -138,7 +158,9 @@ uint32_t DevInfoParser::getHwPartNumber()
 String DevInfoParser::getHwVersion()
 {
     char buf[8];
+    HOY_SEMAPHORE_TAKE();
     snprintf(buf, sizeof(buf), "%02d.%02d", _payloadDevInfoSimple[6], _payloadDevInfoSimple[7]);
+    HOY_SEMAPHORE_GIVE();
     return buf;
 }
 
@@ -160,28 +182,49 @@ String DevInfoParser::getHwModelName()
     return devInfo[idx].modelName;
 }
 
+bool DevInfoParser::containsValidData()
+{
+    time_t t = getFwBuildDateTime();
+
+    struct tm info;
+    localtime_r(&t, &info);
+
+    return info.tm_year > (2016 - 1900);
+}
+
 uint8_t DevInfoParser::getDevIdx()
 {
+    uint8_t ret = 0xff;
     uint8_t pos;
+
+    HOY_SEMAPHORE_TAKE();
+
     // Check for all 4 bytes first
     for (pos = 0; pos < sizeof(devInfo) / sizeof(devInfo_t); pos++) {
         if (devInfo[pos].hwPart[0] == _payloadDevInfoSimple[2]
             && devInfo[pos].hwPart[1] == _payloadDevInfoSimple[3]
             && devInfo[pos].hwPart[2] == _payloadDevInfoSimple[4]
             && devInfo[pos].hwPart[3] == _payloadDevInfoSimple[5]) {
-            return pos;
+            ret = pos;
+            break;
         }
     }
 
-    // Then only for 3 bytes
-    for (pos = 0; pos < sizeof(devInfo) / sizeof(devInfo_t); pos++) {
-        if (devInfo[pos].hwPart[0] == _payloadDevInfoSimple[2]
-            && devInfo[pos].hwPart[1] == _payloadDevInfoSimple[3]
-            && devInfo[pos].hwPart[2] == _payloadDevInfoSimple[4]) {
-            return pos;
+    // Then only for 3 bytes but only if not already found
+    if (ret == 0xff) {
+        for (pos = 0; pos < sizeof(devInfo) / sizeof(devInfo_t); pos++) {
+            if (devInfo[pos].hwPart[0] == _payloadDevInfoSimple[2]
+                && devInfo[pos].hwPart[1] == _payloadDevInfoSimple[3]
+                && devInfo[pos].hwPart[2] == _payloadDevInfoSimple[4]) {
+                ret = pos;
+                break;
+            }
         }
     }
-    return 0xff;
+
+    HOY_SEMAPHORE_GIVE();
+
+    return ret;
 }
 
 /* struct tm to seconds since Unix epoch */

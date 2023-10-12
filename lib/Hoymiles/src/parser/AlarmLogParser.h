@@ -1,15 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 #pragma once
 #include "Parser.h"
-#include <Arduino.h>
-#include <cstdint>
 #include <array>
+#include <cstdint>
 
 #define ALARM_LOG_ENTRY_COUNT 15
 #define ALARM_LOG_ENTRY_SIZE 12
 #define ALARM_LOG_PAYLOAD_SIZE (ALARM_LOG_ENTRY_COUNT * ALARM_LOG_ENTRY_SIZE + 4)
 
-#define ALARM_MSG_COUNT 77
+#define ALARM_MSG_COUNT 111
 
 struct AlarmLogEntry_t {
     uint16_t MessageId;
@@ -31,6 +30,7 @@ typedef struct {
 
 class AlarmLogParser : public Parser {
 public:
+    AlarmLogParser();
     void clearBuffer();
     void appendFragment(uint8_t offset, uint8_t* payload, uint8_t len);
 
@@ -46,7 +46,7 @@ private:
     static int getTimezoneOffset();
 
     uint8_t _payloadAlarmLog[ALARM_LOG_PAYLOAD_SIZE];
-    uint8_t _alarmLogLength;
+    uint8_t _alarmLogLength = 0;
 
     LastCommandSuccess _lastAlarmRequestSuccess = CMD_NOK; // Set to NOK to fetch at startup
 
