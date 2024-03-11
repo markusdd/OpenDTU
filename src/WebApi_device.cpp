@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2022 Thomas Basler and others
+ * Copyright (C) 2022-2024 Thomas Basler and others
  */
 #include "WebApi_device.h"
 #include "Configuration.h"
@@ -12,18 +12,12 @@
 #include "helper.h"
 #include <AsyncJson.h>
 
-void WebApiDeviceClass::init(AsyncWebServer* server)
+void WebApiDeviceClass::init(AsyncWebServer& server, Scheduler& scheduler)
 {
     using std::placeholders::_1;
 
-    _server = server;
-
-    _server->on("/api/device/config", HTTP_GET, std::bind(&WebApiDeviceClass::onDeviceAdminGet, this, _1));
-    _server->on("/api/device/config", HTTP_POST, std::bind(&WebApiDeviceClass::onDeviceAdminPost, this, _1));
-}
-
-void WebApiDeviceClass::loop()
-{
+    server.on("/api/device/config", HTTP_GET, std::bind(&WebApiDeviceClass::onDeviceAdminGet, this, _1));
+    server.on("/api/device/config", HTTP_POST, std::bind(&WebApiDeviceClass::onDeviceAdminPost, this, _1));
 }
 
 void WebApiDeviceClass::onDeviceAdminGet(AsyncWebServerRequest* request)
@@ -33,14 +27,14 @@ void WebApiDeviceClass::onDeviceAdminGet(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse(false, MQTT_JSON_DOC_SIZE);
-    JsonObject root = response->getRoot();
+    auto& root = response->getRoot();
     const CONFIG_T& config = Configuration.get();
     const PinMapping_t& pin = PinMapping.get();
 
-    JsonObject curPin = root.createNestedObject("curPin");
+    auto curPin = root.createNestedObject("curPin");
     curPin["name"] = config.Dev_PinMapping;
 
-    JsonObject nrfPinObj = curPin.createNestedObject("nrf24");
+    auto nrfPinObj = curPin.createNestedObject("nrf24");
     nrfPinObj["clk"] = pin.nrf24_clk;
     nrfPinObj["cs"] = pin.nrf24_cs;
     nrfPinObj["en"] = pin.nrf24_en;
@@ -48,7 +42,7 @@ void WebApiDeviceClass::onDeviceAdminGet(AsyncWebServerRequest* request)
     nrfPinObj["miso"] = pin.nrf24_miso;
     nrfPinObj["mosi"] = pin.nrf24_mosi;
 
-    JsonObject cmtPinObj = curPin.createNestedObject("cmt");
+    auto cmtPinObj = curPin.createNestedObject("cmt");
     cmtPinObj["clk"] = pin.cmt_clk;
     cmtPinObj["cs"] = pin.cmt_cs;
     cmtPinObj["fcs"] = pin.cmt_fcs;
@@ -56,7 +50,7 @@ void WebApiDeviceClass::onDeviceAdminGet(AsyncWebServerRequest* request)
     cmtPinObj["gpio2"] = pin.cmt_gpio2;
     cmtPinObj["gpio3"] = pin.cmt_gpio3;
 
-    JsonObject ethPinObj = curPin.createNestedObject("eth");
+    auto ethPinObj = curPin.createNestedObject("eth");
     ethPinObj["enabled"] = pin.eth_enabled;
     ethPinObj["phy_addr"] = pin.eth_phy_addr;
     ethPinObj["power"] = pin.eth_power;
@@ -65,23 +59,32 @@ void WebApiDeviceClass::onDeviceAdminGet(AsyncWebServerRequest* request)
     ethPinObj["type"] = pin.eth_type;
     ethPinObj["clk_mode"] = pin.eth_clk_mode;
 
-    JsonObject displayPinObj = curPin.createNestedObject("display");
+    auto displayPinObj = curPin.createNestedObject("display");
     displayPinObj["type"] = pin.display_type;
     displayPinObj["data"] = pin.display_data;
     displayPinObj["clk"] = pin.display_clk;
     displayPinObj["cs"] = pin.display_cs;
     displayPinObj["reset"] = pin.display_reset;
 
-    JsonObject ledPinObj = curPin.createNestedObject("led");
-    ledPinObj["led0"] = pin.led[0];
-    ledPinObj["led1"] = pin.led[1];
+    auto ledPinObj = curPin.createNestedObject("led");
+    for (uint8_t i = 0; i < PINMAPPING_LED_COUNT; i++) {
+        ledPinObj["led" + String(i)] = pin.led[i];
+    }
 
-    JsonObject display = root.createNestedObject("display");
-    display["rotation"] = config.Display_Rotation;
-    display["power_safe"] = config.Display_PowerSafe;
-    display["screensaver"] = config.Display_ScreenSaver;
-    display["contrast"] = config.Display_Contrast;
-    display["language"] = config.Display_Language;
+    auto display = root.createNestedObject("display");
+    display["rotation"] = config.Display.Rotation;
+    display["power_safe"] = config.Display.PowerSafe;
+    display["screensaver"] = config.Display.ScreenSaver;
+    display["contrast"] = config.Display.Contrast;
+    display["language"] = config.Display.Language;
+    display["diagramduration"] = config.Display.Diagram.Duration;
+    display["diagrammode"] = config.Display.Diagram.Mode;
+
+    auto leds = root.createNestedArray("led");
+    for (uint8_t i = 0; i < PINMAPPING_LED_COUNT; i++) {
+        auto led = leds.createNestedObject();
+        led["brightness"] = config.Led_Single[i].Brightness;
+    }
 
     response->setLength();
     request->send(response);
@@ -94,7 +97,7 @@ void WebApiDeviceClass::onDeviceAdminPost(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse(false, MQTT_JSON_DOC_SIZE);
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -105,7 +108,7 @@ void WebApiDeviceClass::onDeviceAdminPost(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > MQTT_JSON_DOC_SIZE) {
         retMsg["message"] = "Data too large!";
@@ -116,7 +119,7 @@ void WebApiDeviceClass::onDeviceAdminPost(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(MQTT_JSON_DOC_SIZE);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";
@@ -148,23 +151,28 @@ void WebApiDeviceClass::onDeviceAdminPost(AsyncWebServerRequest* request)
     bool performRestart = root["curPin"]["name"].as<String>() != config.Dev_PinMapping;
 
     strlcpy(config.Dev_PinMapping, root["curPin"]["name"].as<String>().c_str(), sizeof(config.Dev_PinMapping));
-    config.Display_Rotation = root["display"]["rotation"].as<uint8_t>();
-    config.Display_PowerSafe = root["display"]["power_safe"].as<bool>();
-    config.Display_ScreenSaver = root["display"]["screensaver"].as<bool>();
-    config.Display_Contrast = root["display"]["contrast"].as<uint8_t>();
-    config.Display_Language = root["display"]["language"].as<uint8_t>();
+    config.Display.Rotation = root["display"]["rotation"].as<uint8_t>();
+    config.Display.PowerSafe = root["display"]["power_safe"].as<bool>();
+    config.Display.ScreenSaver = root["display"]["screensaver"].as<bool>();
+    config.Display.Contrast = root["display"]["contrast"].as<uint8_t>();
+    config.Display.Language = root["display"]["language"].as<uint8_t>();
+    config.Display.Diagram.Duration = root["display"]["diagramduration"].as<uint32_t>();
+    config.Display.Diagram.Mode = root["display"]["diagrammode"].as<DiagramMode_t>();
 
-    Display.setOrientation(config.Display_Rotation);
-    Display.enablePowerSafe = config.Display_PowerSafe;
-    Display.enableScreensaver = config.Display_ScreenSaver;
-    Display.setContrast(config.Display_Contrast);
-    Display.setLanguage(config.Display_Language);
+    for (uint8_t i = 0; i < PINMAPPING_LED_COUNT; i++) {
+        config.Led_Single[i].Brightness = root["led"][i]["brightness"].as<uint8_t>();
+        config.Led_Single[i].Brightness = min<uint8_t>(100, config.Led_Single[i].Brightness);
+    }
 
-    Configuration.write();
+    Display.setDiagramMode(static_cast<DiagramMode_t>(config.Display.Diagram.Mode));
+    Display.setOrientation(config.Display.Rotation);
+    Display.enablePowerSafe = config.Display.PowerSafe;
+    Display.enableScreensaver = config.Display.ScreenSaver;
+    Display.setContrast(config.Display.Contrast);
+    Display.setLanguage(config.Display.Language);
+    Display.Diagram().updatePeriod();
 
-    retMsg["type"] = "success";
-    retMsg["message"] = "Settings saved!";
-    retMsg["code"] = WebApiError::GenericSuccess;
+    WebApi.writeConfig(retMsg);
 
     response->setLength();
     request->send(response);

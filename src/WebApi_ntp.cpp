@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2022 Thomas Basler and others
+ * Copyright (C) 2022-2024 Thomas Basler and others
  */
 #include "WebApi_ntp.h"
 #include "Configuration.h"
@@ -11,21 +11,15 @@
 #include "helper.h"
 #include <AsyncJson.h>
 
-void WebApiNtpClass::init(AsyncWebServer* server)
+void WebApiNtpClass::init(AsyncWebServer& server, Scheduler& scheduler)
 {
     using std::placeholders::_1;
 
-    _server = server;
-
-    _server->on("/api/ntp/status", HTTP_GET, std::bind(&WebApiNtpClass::onNtpStatus, this, _1));
-    _server->on("/api/ntp/config", HTTP_GET, std::bind(&WebApiNtpClass::onNtpAdminGet, this, _1));
-    _server->on("/api/ntp/config", HTTP_POST, std::bind(&WebApiNtpClass::onNtpAdminPost, this, _1));
-    _server->on("/api/ntp/time", HTTP_GET, std::bind(&WebApiNtpClass::onNtpTimeGet, this, _1));
-    _server->on("/api/ntp/time", HTTP_POST, std::bind(&WebApiNtpClass::onNtpTimePost, this, _1));
-}
-
-void WebApiNtpClass::loop()
-{
+    server.on("/api/ntp/status", HTTP_GET, std::bind(&WebApiNtpClass::onNtpStatus, this, _1));
+    server.on("/api/ntp/config", HTTP_GET, std::bind(&WebApiNtpClass::onNtpAdminGet, this, _1));
+    server.on("/api/ntp/config", HTTP_POST, std::bind(&WebApiNtpClass::onNtpAdminPost, this, _1));
+    server.on("/api/ntp/time", HTTP_GET, std::bind(&WebApiNtpClass::onNtpTimeGet, this, _1));
+    server.on("/api/ntp/time", HTTP_POST, std::bind(&WebApiNtpClass::onNtpTimePost, this, _1));
 }
 
 void WebApiNtpClass::onNtpStatus(AsyncWebServerRequest* request)
@@ -35,12 +29,12 @@ void WebApiNtpClass::onNtpStatus(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject root = response->getRoot();
+    auto& root = response->getRoot();
     const CONFIG_T& config = Configuration.get();
 
-    root["ntp_server"] = config.Ntp_Server;
-    root["ntp_timezone"] = config.Ntp_Timezone;
-    root["ntp_timezone_descr"] = config.Ntp_TimezoneDescr;
+    root["ntp_server"] = config.Ntp.Server;
+    root["ntp_timezone"] = config.Ntp.Timezone;
+    root["ntp_timezone_descr"] = config.Ntp.TimezoneDescr;
 
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo, 5)) {
@@ -80,15 +74,15 @@ void WebApiNtpClass::onNtpAdminGet(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject root = response->getRoot();
+    auto& root = response->getRoot();
     const CONFIG_T& config = Configuration.get();
 
-    root["ntp_server"] = config.Ntp_Server;
-    root["ntp_timezone"] = config.Ntp_Timezone;
-    root["ntp_timezone_descr"] = config.Ntp_TimezoneDescr;
-    root["longitude"] = config.Ntp_Longitude;
-    root["latitude"] = config.Ntp_Latitude;
-    root["sunsettype"] = config.Ntp_SunsetType;
+    root["ntp_server"] = config.Ntp.Server;
+    root["ntp_timezone"] = config.Ntp.Timezone;
+    root["ntp_timezone_descr"] = config.Ntp.TimezoneDescr;
+    root["longitude"] = config.Ntp.Longitude;
+    root["latitude"] = config.Ntp.Latitude;
+    root["sunsettype"] = config.Ntp.SunsetType;
 
     response->setLength();
     request->send(response);
@@ -101,7 +95,7 @@ void WebApiNtpClass::onNtpAdminPost(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -112,7 +106,7 @@ void WebApiNtpClass::onNtpAdminPost(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > 1024) {
         retMsg["message"] = "Data too large!";
@@ -123,7 +117,7 @@ void WebApiNtpClass::onNtpAdminPost(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(1024);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";
@@ -173,23 +167,22 @@ void WebApiNtpClass::onNtpAdminPost(AsyncWebServerRequest* request)
     }
 
     CONFIG_T& config = Configuration.get();
-    strlcpy(config.Ntp_Server, root["ntp_server"].as<String>().c_str(), sizeof(config.Ntp_Server));
-    strlcpy(config.Ntp_Timezone, root["ntp_timezone"].as<String>().c_str(), sizeof(config.Ntp_Timezone));
-    strlcpy(config.Ntp_TimezoneDescr, root["ntp_timezone_descr"].as<String>().c_str(), sizeof(config.Ntp_TimezoneDescr));
-    config.Ntp_Latitude = root["latitude"].as<double>();
-    config.Ntp_Longitude = root["longitude"].as<double>();
-    config.Ntp_SunsetType = root["sunsettype"].as<uint8_t>();
-    Configuration.write();
+    strlcpy(config.Ntp.Server, root["ntp_server"].as<String>().c_str(), sizeof(config.Ntp.Server));
+    strlcpy(config.Ntp.Timezone, root["ntp_timezone"].as<String>().c_str(), sizeof(config.Ntp.Timezone));
+    strlcpy(config.Ntp.TimezoneDescr, root["ntp_timezone_descr"].as<String>().c_str(), sizeof(config.Ntp.TimezoneDescr));
+    config.Ntp.Latitude = root["latitude"].as<double>();
+    config.Ntp.Longitude = root["longitude"].as<double>();
+    config.Ntp.SunsetType = root["sunsettype"].as<uint8_t>();
 
-    retMsg["type"] = "success";
-    retMsg["message"] = "Settings saved!";
-    retMsg["code"] = WebApiError::GenericSuccess;
+    WebApi.writeConfig(retMsg);
 
     response->setLength();
     request->send(response);
 
     NtpSettings.setServer();
     NtpSettings.setTimezone();
+
+    SunPosition.setDoRecalc(true);
 }
 
 void WebApiNtpClass::onNtpTimeGet(AsyncWebServerRequest* request)
@@ -199,7 +192,7 @@ void WebApiNtpClass::onNtpTimeGet(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject root = response->getRoot();
+    auto& root = response->getRoot();
 
     struct tm timeinfo;
     if (!getLocalTime(&timeinfo, 5)) {
@@ -226,7 +219,7 @@ void WebApiNtpClass::onNtpTimePost(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -237,7 +230,7 @@ void WebApiNtpClass::onNtpTimePost(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > 1024) {
         retMsg["message"] = "Data too large!";
@@ -248,7 +241,7 @@ void WebApiNtpClass::onNtpTimePost(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(1024);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";

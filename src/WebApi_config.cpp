@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2022 Thomas Basler and others
+ * Copyright (C) 2022-2024 Thomas Basler and others
  */
 #include "WebApi_config.h"
 #include "Configuration.h"
@@ -10,7 +10,7 @@
 #include <AsyncJson.h>
 #include <LittleFS.h>
 
-void WebApiConfigClass::init(AsyncWebServer* server)
+void WebApiConfigClass::init(AsyncWebServer& server, Scheduler& scheduler)
 {
     using std::placeholders::_1;
     using std::placeholders::_2;
@@ -19,18 +19,12 @@ void WebApiConfigClass::init(AsyncWebServer* server)
     using std::placeholders::_5;
     using std::placeholders::_6;
 
-    _server = server;
-
-    _server->on("/api/config/get", HTTP_GET, std::bind(&WebApiConfigClass::onConfigGet, this, _1));
-    _server->on("/api/config/delete", HTTP_POST, std::bind(&WebApiConfigClass::onConfigDelete, this, _1));
-    _server->on("/api/config/list", HTTP_GET, std::bind(&WebApiConfigClass::onConfigListGet, this, _1));
-    _server->on("/api/config/upload", HTTP_POST,
+    server.on("/api/config/get", HTTP_GET, std::bind(&WebApiConfigClass::onConfigGet, this, _1));
+    server.on("/api/config/delete", HTTP_POST, std::bind(&WebApiConfigClass::onConfigDelete, this, _1));
+    server.on("/api/config/list", HTTP_GET, std::bind(&WebApiConfigClass::onConfigListGet, this, _1));
+    server.on("/api/config/upload", HTTP_POST,
         std::bind(&WebApiConfigClass::onConfigUploadFinish, this, _1),
         std::bind(&WebApiConfigClass::onConfigUpload, this, _1, _2, _3, _4, _5, _6));
-}
-
-void WebApiConfigClass::loop()
-{
 }
 
 void WebApiConfigClass::onConfigGet(AsyncWebServerRequest* request)
@@ -59,7 +53,7 @@ void WebApiConfigClass::onConfigDelete(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -70,7 +64,7 @@ void WebApiConfigClass::onConfigDelete(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > 1024) {
         retMsg["message"] = "Data too large!";
@@ -81,7 +75,7 @@ void WebApiConfigClass::onConfigDelete(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(1024);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";
@@ -114,7 +108,7 @@ void WebApiConfigClass::onConfigDelete(AsyncWebServerRequest* request)
     response->setLength();
     request->send(response);
 
-    LittleFS.remove(CONFIG_FILENAME);
+    Utils::removeAllFiles();
     Utils::restartDtu();
 }
 
@@ -125,8 +119,8 @@ void WebApiConfigClass::onConfigListGet(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject root = response->getRoot();
-    JsonArray data = root.createNestedArray("configs");
+    auto& root = response->getRoot();
+    auto data = root.createNestedArray("configs");
 
     File rootfs = LittleFS.open("/");
     File file = rootfs.openNextFile();
@@ -173,7 +167,7 @@ void WebApiConfigClass::onConfigUpload(AsyncWebServerRequest* request, String fi
             request->send(500);
             return;
         }
-        String name = "/" + request->getParam("file")->value();
+        const String name = "/" + request->getParam("file")->value();
         request->_tempFile = LittleFS.open(name, "w");
     }
 

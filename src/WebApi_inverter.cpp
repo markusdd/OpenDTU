@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * Copyright (C) 2022 Thomas Basler and others
+ * Copyright (C) 2022-2024 Thomas Basler and others
  */
 #include "WebApi_inverter.h"
 #include "Configuration.h"
@@ -12,21 +12,15 @@
 #include <AsyncJson.h>
 #include <Hoymiles.h>
 
-void WebApiInverterClass::init(AsyncWebServer* server)
+void WebApiInverterClass::init(AsyncWebServer& server, Scheduler& scheduler)
 {
     using std::placeholders::_1;
 
-    _server = server;
-
-    _server->on("/api/inverter/list", HTTP_GET, std::bind(&WebApiInverterClass::onInverterList, this, _1));
-    _server->on("/api/inverter/add", HTTP_POST, std::bind(&WebApiInverterClass::onInverterAdd, this, _1));
-    _server->on("/api/inverter/edit", HTTP_POST, std::bind(&WebApiInverterClass::onInverterEdit, this, _1));
-    _server->on("/api/inverter/del", HTTP_POST, std::bind(&WebApiInverterClass::onInverterDelete, this, _1));
-    _server->on("/api/inverter/order", HTTP_POST, std::bind(&WebApiInverterClass::onInverterOrder, this, _1));
-}
-
-void WebApiInverterClass::loop()
-{
+    server.on("/api/inverter/list", HTTP_GET, std::bind(&WebApiInverterClass::onInverterList, this, _1));
+    server.on("/api/inverter/add", HTTP_POST, std::bind(&WebApiInverterClass::onInverterAdd, this, _1));
+    server.on("/api/inverter/edit", HTTP_POST, std::bind(&WebApiInverterClass::onInverterEdit, this, _1));
+    server.on("/api/inverter/del", HTTP_POST, std::bind(&WebApiInverterClass::onInverterDelete, this, _1));
+    server.on("/api/inverter/order", HTTP_POST, std::bind(&WebApiInverterClass::onInverterOrder, this, _1));
 }
 
 void WebApiInverterClass::onInverterList(AsyncWebServerRequest* request)
@@ -36,7 +30,7 @@ void WebApiInverterClass::onInverterList(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse(false, 768 * INV_MAX_COUNT);
-    JsonObject root = response->getRoot();
+    auto& root = response->getRoot();
     JsonArray data = root.createNestedArray("inverter");
 
     const CONFIG_T& config = Configuration.get();
@@ -61,6 +55,7 @@ void WebApiInverterClass::onInverterList(AsyncWebServerRequest* request)
             obj["reachable_threshold"] = config.Inverter[i].ReachableThreshold;
             obj["zero_runtime"] = config.Inverter[i].ZeroRuntimeDataIfUnrechable;
             obj["zero_day"] = config.Inverter[i].ZeroYieldDayOnMidnight;
+            obj["yieldday_correction"] = config.Inverter[i].YieldDayCorrection;
 
             auto inv = Hoymiles.getInverterBySerial(config.Inverter[i].Serial);
             uint8_t max_channels;
@@ -93,7 +88,7 @@ void WebApiInverterClass::onInverterAdd(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -104,7 +99,7 @@ void WebApiInverterClass::onInverterAdd(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > 1024) {
         retMsg["message"] = "Data too large!";
@@ -115,7 +110,7 @@ void WebApiInverterClass::onInverterAdd(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(1024);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";
@@ -166,11 +161,8 @@ void WebApiInverterClass::onInverterAdd(AsyncWebServerRequest* request)
     inverter->Serial = strtoll(root["serial"].as<String>().c_str(), NULL, 16);
 
     strncpy(inverter->Name, root["name"].as<String>().c_str(), INV_MAX_NAME_STRLEN);
-    Configuration.write();
 
-    retMsg["type"] = "success";
-    retMsg["message"] = "Inverter created!";
-    retMsg["code"] = WebApiError::InverterAdded;
+    WebApi.writeConfig(retMsg, WebApiError::InverterAdded, "Inverter created!");
 
     response->setLength();
     request->send(response);
@@ -193,7 +185,7 @@ void WebApiInverterClass::onInverterEdit(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -204,7 +196,7 @@ void WebApiInverterClass::onInverterEdit(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > 1024) {
         retMsg["message"] = "Data too large!";
@@ -215,7 +207,7 @@ void WebApiInverterClass::onInverterEdit(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(1024);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";
@@ -288,15 +280,12 @@ void WebApiInverterClass::onInverterEdit(AsyncWebServerRequest* request)
         inverter.ReachableThreshold = root["reachable_threshold"] | REACHABLE_THRESHOLD;
         inverter.ZeroRuntimeDataIfUnrechable = root["zero_runtime"] | false;
         inverter.ZeroYieldDayOnMidnight = root["zero_day"] | false;
+        inverter.YieldDayCorrection = root["yieldday_correction"] | false;
 
         arrayCount++;
     }
 
-    Configuration.write();
-
-    retMsg["type"] = "success";
-    retMsg["code"] = WebApiError::InverterChanged;
-    retMsg["message"] = "Inverter changed!";
+    WebApi.writeConfig(retMsg, WebApiError::InverterChanged, "Inverter changed!");
 
     response->setLength();
     request->send(response);
@@ -321,6 +310,7 @@ void WebApiInverterClass::onInverterEdit(AsyncWebServerRequest* request)
         inv->setReachableThreshold(inverter.ReachableThreshold);
         inv->setZeroValuesIfUnreachable(inverter.ZeroRuntimeDataIfUnrechable);
         inv->setZeroYieldDayOnMidnight(inverter.ZeroYieldDayOnMidnight);
+        inv->Statistics()->setYieldDayCorrection(inverter.YieldDayCorrection);
         for (uint8_t c = 0; c < INV_MAX_CHAN_COUNT; c++) {
             inv->Statistics()->setStringMaxPower(c, inverter.channel[c].MaxChannelPower);
             inv->Statistics()->setChannelFieldOffset(TYPE_DC, static_cast<ChannelNum_t>(c), FLD_YT, inverter.channel[c].YieldTotalOffset);
@@ -337,7 +327,7 @@ void WebApiInverterClass::onInverterDelete(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -348,7 +338,7 @@ void WebApiInverterClass::onInverterDelete(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > 1024) {
         retMsg["message"] = "Data too large!";
@@ -359,7 +349,7 @@ void WebApiInverterClass::onInverterDelete(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(1024);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";
@@ -392,11 +382,8 @@ void WebApiInverterClass::onInverterDelete(AsyncWebServerRequest* request)
 
     inverter.Serial = 0;
     strncpy(inverter.Name, "", sizeof(inverter.Name));
-    Configuration.write();
 
-    retMsg["type"] = "success";
-    retMsg["message"] = "Inverter deleted!";
-    retMsg["code"] = WebApiError::InverterDeleted;
+    WebApi.writeConfig(retMsg, WebApiError::InverterDeleted, "Inverter deleted!");
 
     response->setLength();
     request->send(response);
@@ -411,7 +398,7 @@ void WebApiInverterClass::onInverterOrder(AsyncWebServerRequest* request)
     }
 
     AsyncJsonResponse* response = new AsyncJsonResponse();
-    JsonObject retMsg = response->getRoot();
+    auto& retMsg = response->getRoot();
     retMsg["type"] = "warning";
 
     if (!request->hasParam("data", true)) {
@@ -422,7 +409,7 @@ void WebApiInverterClass::onInverterOrder(AsyncWebServerRequest* request)
         return;
     }
 
-    String json = request->getParam("data", true)->value();
+    const String json = request->getParam("data", true)->value();
 
     if (json.length() > 1024) {
         retMsg["message"] = "Data too large!";
@@ -433,7 +420,7 @@ void WebApiInverterClass::onInverterOrder(AsyncWebServerRequest* request)
     }
 
     DynamicJsonDocument root(1024);
-    DeserializationError error = deserializeJson(root, json);
+    const DeserializationError error = deserializeJson(root, json);
 
     if (error) {
         retMsg["message"] = "Failed to parse data!";
@@ -463,11 +450,7 @@ void WebApiInverterClass::onInverterOrder(AsyncWebServerRequest* request)
         order++;
     }
 
-    Configuration.write();
-
-    retMsg["type"] = "success";
-    retMsg["message"] = "Inverter order saved!";
-    retMsg["code"] = WebApiError::InverterOrdered;
+    WebApi.writeConfig(retMsg, WebApiError::InverterOrdered, "Inverter order saved!");
 
     response->setLength();
     request->send(response);
